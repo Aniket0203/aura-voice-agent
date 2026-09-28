@@ -584,7 +584,7 @@ export default function Home() {
         <h3>Test Orders Helper</h3>
         <table>
           <thead>
-            <tr><th>Order ID</th><th>Customer</th><th>Product</th><th>Status</th></tr>
+            <tr><th>Order ID</th><th>Customer</th><th>Product</th><th>Value</th><th>Status</th><th>Notes</th></tr>
           </thead>
           <tbody>
             {Object.values(ORDERS).map((o) => (
@@ -592,7 +592,10 @@ export default function Home() {
                 <td>{o.order_id}</td>
                 <td>{o.customer}</td>
                 <td>{o.product}</td>
+                <td>{o.value}</td>
                 <td>{o.status}</td>
+                <td>{o.notes}</td>
+                
               </tr>
             ))}
           </tbody>
