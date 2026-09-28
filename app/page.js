@@ -236,7 +236,9 @@ export default function Home() {
               <th>Order ID</th>
               <th>Customer</th>
               <th>Product</th>
+              <th>Value</th>
               <th>Status</th>
+              <th>Notes</th>
             </tr>
           </thead>
           <tbody>
@@ -245,7 +247,9 @@ export default function Home() {
                 <td>{o.order_id}</td>
                 <td>{o.customer}</td>
                 <td>{o.product}</td>
+                <td>{o.value}</td>
                 <td>{o.status}</td>
+                <td>{o.notes}</td>
               </tr>
             ))}
           </tbody>

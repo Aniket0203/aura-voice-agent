@@ -1,124 +1,91 @@
-# Aura Skincare — AI Voice CX Agent
+# Aura Skincare — AI Voice CX Agent ("Aria")
 
-A browser-based voice customer support agent ("Aria") for a fictional D2C
-skincare brand, built for the DataStraw AI Voice Agent assessment.
+A browser-based AI voice customer support agent for a fictional D2C skincare brand, built for the DataStraw AI Voice Agent assessment.
 
-**This build uses a 100% free stack — no paid API required to run it.**
+- **Live app:** https://aura-voice-agent-peach.vercel.app
+- **Open in Google Chrome (desktop)** and allow microphone access. Firefox and Safari do not support the browser speech recognition used here.
 
-## What's inside
+## What it does
+
+- Natural voice conversation with "Aria" (Start Call / End Call, live state: Listening / Thinking / Speaking, typing dots while thinking)
+- Answers using Aura Skincare's shipping, return, cancellation and COD policies, and refuses requests outside policy
+- Looks up live order details through a `get_order_details` tool (ORD-101, ORD-102, ORD-103)
+- Handles missing or invalid order IDs, unclear audio, and out-of-scope requests without making things up
+- English and Hindi/Hinglish (language toggle; Aria replies in the language the customer uses)
+- After the call: full transcript and a structured JSON outcome
+- "Test Orders Helper" panel on the page so the sample orders can be tried immediately
+
+## Architecture
+
+A modular pipeline, built on free tiers:
+
+1. **Speech to text:** the browser's built-in `SpeechRecognition` (Chrome/Edge).
+2. **Reasoning and tool use:** the text goes to `/api/chat` (Next.js API route), which calls Google Gemini (free tier). Aria's persona and the brand policies are sent as system instructions, and `get_order_details` is registered as a tool.
+3. **Tool call:** when the customer asks about an order, Gemini decides to call the tool. The server runs the lookup on the mock database, sends the result back to Gemini, and returns one final natural-language reply.
+4. **Text to speech:** the browser's built-in `speechSynthesis` speaks the reply, then listening restarts.
+5. **Post-call summary:** the transcript is sent to `/api/summarize`, which asks Gemini for the structured JSON.
 
 ```
-app/
-  page.js                 -> The whole UI + speech recognition/synthesis logic
-  layout.js                -> Next.js root layout
-  globals.css              -> Styling
-  api/chat/route.js        -> Talks to Gemini, runs the order-lookup tool
-  api/summarize/route.js   -> Turns the transcript into structured JSON
-lib/
-  orders.js                -> Mock order database + get_order_details tool
-  prompt.js                -> Aria's persona + Aura Skincare's brand policies
+app/page.js                 UI + speech recognition/synthesis + call loop
+app/api/chat/route.js       Gemini call, tool-calling loop, retry + graceful fallback
+app/api/summarize/route.js  Post-call JSON summary (with fallback)
+lib/orders.js               Mock order database + get_order_details tool
+lib/prompt.js               Aria's persona and brand policies (guardrails)
 ```
 
-## How it works (architecture)
+**How the agent decides to use the tool:** the tool's name, description and parameters are given to Gemini; the model itself decides when a customer message needs an order lookup. If no order ID was given, the prompt tells it to ask for one first.
 
-This is a **modular pipeline** (one of the approaches the assignment
-explicitly allows): Speech-to-Text -> LLM reasoning & tool execution ->
-Text-to-Speech, deliberately built entirely on free tiers:
+**How guardrails work:** the policies and the "what you must not do" rules live in the system prompt (`lib/prompt.js`). The order data always comes from the tool, never from the model's memory.
 
-1. The browser's own built-in `SpeechRecognition` API listens to the
-   customer and turns speech into text — no API, no cost.
-2. That text is sent to our `/api/chat` route, which calls **Google
-   Gemini's free API tier** (`gemini-2.5-flash`, no credit card required)
-   with Aria's persona/policies as system instructions and
-   `get_order_details` registered as a callable tool.
-3. If Gemini decides it needs order info, our server runs the lookup
-   against the mock database itself and asks Gemini again with the
-   result, so the browser only ever receives one final, natural-language
-   reply.
-4. The browser speaks that reply using its own built-in
-   `speechSynthesis` API — again, no API, no cost — then starts
-   listening for the next sentence.
-5. When the call ends, the full transcript is sent to Gemini once more
-   to produce the structured JSON summary.
+**Graceful degradation:** automatic retry on temporary Gemini errors (429/503), a spoken fallback line instead of raw errors, a locally generated summary if Gemini is unreachable, and an instant local reply to "thank you / bye" (no API call).
 
 ## Setup
 
 ```bash
 npm install
-cp .env.example .env.local   # then paste your free Gemini key in
+cp .env.example .env.local     # paste your free Gemini key
 npm run dev
 ```
 
-Get a free key (no credit card): go to **aistudio.google.com**, sign in
-with any Google account, click **"Get API key"** in the left sidebar,
-create one, and paste it into `.env.local`.
+Get a free key (no credit card) at https://aistudio.google.com. Open `http://localhost:3000` in Chrome.
 
-Open `http://localhost:3000` in **Google Chrome** (required — Chrome has
-the best support for browser speech recognition), click **Start Call**,
-and allow microphone access.
+Deployment: push to GitHub, import into Vercel, add `GEMINI_API_KEY` as an environment variable, deploy.
 
-## Deploying
+## Test scenarios I ran
 
-1. Push this folder to a new GitHub repo.
-2. Import it into [Vercel](https://vercel.com/new).
-3. In Vercel's project settings, add an environment variable:
-   `GEMINI_API_KEY` = your free key.
-4. Deploy — Vercel gives you a public URL automatically.
+| Say this | Expected |
+|---|---|
+| "Where is my order ORD-101?" | Out for delivery, BlueDart, expected by 6 PM today |
+| "Mera order kahan hai" then "101" | Asks for the ID, then answers in Hinglish |
+| "I opened it 20 days ago, can I return it?" | Polite refusal citing the 7-day, unopened policy |
+| "Cancel ORD-101" / "Cancel ORD-103" | Refused (out for delivery) / allowed (processing) |
+| "Any delivery charge?" | Free above ₹499, ₹50 below |
+| "Book me a flight to Goa" | Only helps with Aura Skincare queries |
+| "Track ORD-999" | Says no such order, asks to verify the ID |
+| "Thank you" | Closing line in the customer's language |
 
-## Testing
+## Known limitations (honest)
 
-Use the sample order IDs shown in the "Test Orders Helper" panel on the
-page: `ORD-101`, `ORD-102`, `ORD-103`. Try saying:
+- Turn-based, not fully real-time: there is no barge-in (the customer cannot interrupt mid-sentence).
+- Voice quality depends on the voices installed in the browser/OS, so it is less natural than a dedicated speech model.
+- Chrome/Edge desktop only.
+- The free Gemini tier has a low request limit (only a few requests per minute and a daily cap), so during heavy use Aria may say she is having trouble and ask the customer to try again.
+- Spoken order IDs can be misheard; there is no fuzzy matching yet.
 
-- "Where is my order ORD-101?" (out for delivery)
-- "I want to cancel ORD-102" (should be refused — already delivered)
-- "Can I return a product I opened 20 days ago?" (should be refused per policy)
-- "Can you book me a flight to Goa?" (should be politely declined as out of scope)
+## Section 9 — How I think
 
-## Section 9 — How I think about this
+**1. Why did you choose this architecture and stack?**
+I started with OpenAI's Realtime speech-to-speech API because it gives the most natural feel, but it needs paid billing and I did not have budget for it (it returned a 429 error). So I switched to a modular pipeline, which the assignment allows: browser speech recognition, Gemini with tool calling, and browser speech synthesis. Everything runs on free tiers. I used Next.js because I already work with React/Next.js, and it lets the UI and the small backend live in one project that deploys to Vercel easily. The trade-off is less natural voice and no barge-in, which I have listed above.
 
-*(Personalize these before submitting — these are an honest starting point
-based on how this project was actually built.)*
+**2. What was the most difficult part, and how did you solve it?**
+Making tool calling reliable on a free tier. Two problems came up. First, the newer Gemini model rejected my follow-up request with a 400 error about a missing `thought_signature`, because I was rebuilding the model's function-call message myself. The fix was to pass back the model's original response parts unchanged. Second, the free-tier limits caused 429 and 503 errors during testing. I added retries, made every failure turn into a polite spoken fallback instead of a raw error, built a fallback summary, and added a local reply for "thank you / bye" so simple closings never use the API.
 
-**1. Why this architecture and stack?**
-I chose a modular pipeline (browser speech recognition -> LLM with tool
-calling -> browser speech synthesis) built entirely on free tiers —
-Google Gemini's free API and the browser's own built-in speech APIs —
-rather than a paid speech-to-speech API. This was a deliberate cost
-trade-off: it sacrifices some of the fluidity of a native voice-to-voice
-model (turn-taking is more explicit, and there's no true mid-sentence
-barge-in), but it demonstrates the same core requirements — natural
-conversation, tool use, guardrails, and graceful degradation — at zero
-running cost, which matters for a real early-stage product decision.
+**3. If you had one more week, what would you improve first and why?**
+Interruption handling (barge-in) and a more natural voice, because they affect how a call feels the most. After that: handling spoken order IDs better (for example "one zero one"), and a set of automated test conversations that check the policy answers, so I can change the prompt without breaking behaviour.
 
-**2. What was the hardest part?**
-Getting the tool-calling round trip right: recognizing when Gemini wants
-order details, running that lookup on the server, and feeding the result
-back in the exact format Gemini expects so it can continue the
-conversation naturally instead of stalling or repeating itself.
+**4. If this agent handled 1,000 conversations a day, what would change?**
+Move to a paid API tier with proper rate limits and a fallback provider; use a real database instead of the mock file; verify the customer's identity before sharing order details (right now anyone who knows an order ID can ask about it); add logging and monitoring for every call (latency, errors, cost, resolution rate); add automated evaluations of policy answers; add a handoff to a human agent for cases the AI cannot resolve; and track cost per call.
 
-**3. With one more week, what would I improve first?**
-Barge-in / interruption handling (letting the customer cut the agent off
-mid-sentence), smarter handling of partial or misheard order IDs (fuzzy
-matching instead of exact match), and evaluating whether a paid
-speech-to-speech API would be worth the cost for a smoother, lower-latency
-experience in production.
+## How I built this
 
-**4. Scaling to 1,000 conversations/day?**
-Replace the in-memory mock database with a real one, add proper logging
-and monitoring for every call, add rate-limiting and cost tracking on the
-Gemini usage (free tier would need a paid upgrade at real scale), and
-consider whether a managed voice AI platform becomes more cost-effective
-than the free browser-based approach once volume is high.
-
-## Notes
-
-- Speech recognition currently only works reliably in **Chrome** and
-  **Edge** — Firefox and Safari have limited or no support for the
-  Web Speech API. The app detects this and shows a message if unsupported.
-- Voice quality depends on your OS's installed text-to-speech voices; the
-  app tries to pick an `en-IN` voice automatically if one is available on
-  your system.
-- Google's Gemini free tier has daily/per-minute request limits — more
-  than enough for a demo, but if you hit a 429 during testing, wait a
-  minute and try again.
+I used AI coding tools (Claude) to help write and debug the code, as the assignment encourages, and I went through each file to understand what it does and why.
